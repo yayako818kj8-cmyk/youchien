@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="ja">
 <head>
@@ -9,8 +10,8 @@
   /* ===== 基本 ===== */
   body {
     margin: 0;
-    overflow: hidden; /* bodyはスクロールさせない */
-    background: #000;
+    overflow: hidden;
+    background: #fff;
   }
 
   /* ===== 読了率バー ===== */
@@ -20,33 +21,35 @@
     left: 0;
     height: 6px;
     width: 100%;
-    background: rgba(255,255,255,0.2);
+    background: rgba(0, 0, 0, 0.15);
     z-index: 1000;
   }
 
   #progress-bar {
     height: 100%;
     width: 0%;
-    background: #00ffcc;
+    background: #00ccaa;
     transition: width 0.1s;
   }
 
   /* ===== マンガコンテナ ===== */
   #container {
     display: flex;
-    flex-direction: row-reverse; /* 右 → 左 */
+    flex-direction: row-reverse;
     height: 100vh;
 
     overflow-x: scroll;
     overflow-y: hidden;
 
     scroll-behavior: smooth;
+    background: #fff;
   }
 
   /* ===== 1コマ ===== */
   .page {
-    flex: 0 0 100vw; /* 1コマ＝画面幅 */
+    flex: 0 0 100vw;
     height: 100vh;
+    background: #fff;
   }
 
   .page img {
@@ -54,29 +57,6 @@
     height: 100%;
     object-fit: contain;
     display: block;
-  }
-
-  /* ===== アンケートページ ===== */
-  #survey {
-    flex: 0 0 100vw;
-    height: 100vh;
-    background: #fff;
-    color: #000;
-
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-    align-items: center;
-  }
-
-  #survey h1 {
-    margin-bottom: 0.5rem;
-  }
-
-  iframe {
-    width: 90%;
-    height: 70%;
-    border: none;
   }
 </style>
 </head>
@@ -96,40 +76,64 @@ const container = document.getElementById("container");
 const progressBar = document.getElementById("progress-bar");
 
 /* ===== マンガ画像を読み込む ===== */
-fetch("pages.json")
-  .then(res => res.json())
+fetch("./youchien.txt")
+  .then(res => {
+    if (!res.ok) {
+      throw new Error(
+        "youchien.txt の読み込みに失敗しました：" + res.status
+      );
+    }
+    return res.json();
+  })
   .then(data => {
-
     data.forEach(file => {
       const page = document.createElement("div");
       page.className = "page";
 
       const img = document.createElement("img");
-      img.src = "pages/" + file;
+      img.src = "./YouchienBoueigumi/" + file;
+      img.alt = file;
+
+      img.onerror = () => {
+        console.error("画像を読み込めませんでした：", img.src);
+      };
 
       page.appendChild(img);
       container.appendChild(page);
     });
 
-    /* ===== アンケートページ ===== */
-    const survey = document.createElement("div");
-    survey.id = "survey";
-    survey.innerHTML = `
-      <h1>アンケートにご協力ください</h1>
-      <p>ご意見は今後の研究に活用します。</p>
-      <iframe src="https://docs.google.com/forms/d/1e4g9vLe-CaiT-30MiuNK_9ZcCsplhU55qEbK2p2E_zo/viewform"></iframe>
-    `;
-    container.appendChild(survey);
+    updateProgress();
+  })
+  .catch(error => {
+    console.error("読み込みエラー：", error);
+
+    const message = document.createElement("p");
+    message.style.color = "#000";
+    message.style.padding = "20px";
+    message.textContent =
+      "マンガを読み込めませんでした。ファイル名と保存場所を確認してください。";
+
+    document.body.appendChild(message);
   });
 
-/* ===== 読了率計算（container基準） ===== */
-container.addEventListener("scroll", () => {
-  const maxScroll = container.scrollWidth - container.clientWidth;
-  const progress = 1 - container.scrollLeft / maxScroll;
+/* ===== 読了率計算 ===== */
+function updateProgress() {
+  const maxScroll =
+    container.scrollWidth - container.clientWidth;
+
+  if (maxScroll <= 0) {
+    progressBar.style.width = "100%";
+    return;
+  }
+
+  const progress =
+    1 - container.scrollLeft / maxScroll;
 
   progressBar.style.width =
     Math.max(0, Math.min(progress * 100, 100)) + "%";
-});
+}
+
+container.addEventListener("scroll", updateProgress);
 </script>
 
 </body>
