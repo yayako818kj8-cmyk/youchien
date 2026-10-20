@@ -7,14 +7,16 @@
 <title>横スクロールマンガ</title>
 
 <style>
-  /* ===== 基本 ===== */
+  * {
+    box-sizing: border-box;
+  }
+
   body {
     margin: 0;
     overflow: hidden;
     background: #fff;
   }
 
-  /* ===== 読了率バー ===== */
   #progress {
     position: fixed;
     top: 0;
@@ -32,24 +34,29 @@
     transition: width 0.1s;
   }
 
-  /* ===== マンガコンテナ ===== */
   #container {
     display: flex;
-    flex-direction: row-reverse;
-    height: 100vh;
-
-    overflow-x: scroll;
+    flex-direction: row;
+    height: 100dvh;
+    width: 100vw;
+    overflow-x: auto;
     overflow-y: hidden;
-
     scroll-behavior: smooth;
     background: #fff;
+    direction: rtl;
+    scrollbar-width: none;
   }
 
-  /* ===== 1コマ ===== */
+  #container::-webkit-scrollbar {
+    display: none;
+  }
+
   .page {
     flex: 0 0 100vw;
-    height: 100vh;
+    width: 100vw;
+    height: 100%;
     background: #fff;
+    direction: ltr;
   }
 
   .page img {
@@ -58,65 +65,78 @@
     object-fit: contain;
     display: block;
   }
+
+  #error {
+    position: fixed;
+    top: 20px;
+    left: 12px;
+    right: 12px;
+    color: #000;
+    background: #fff;
+    z-index: 2000;
+    overflow-wrap: anywhere;
+  }
 </style>
 </head>
 
 <body>
-
-<!-- 読了率バー -->
 <div id="progress">
   <div id="progress-bar"></div>
 </div>
 
-<!-- マンガ本体 -->
 <div id="container"></div>
+<div id="error"></div>
 
 <script>
 const container = document.getElementById("container");
 const progressBar = document.getElementById("progress-bar");
+const errorBox = document.getElementById("error");
 
-/* ===== マンガ画像を読み込む ===== */
+/* 実際の画像フォルダ名に合わせる */
+const imageFolder = "./YouchienBoueigumi/";
+
 fetch("./youchien.txt")
-  .then(res => {
-    if (!res.ok) {
+  .then(response => {
+    if (!response.ok) {
       throw new Error(
-        "youchien.txt の読み込みに失敗しました：" + res.status
+        "youchien.txt を読み込めません。HTTP " + response.status
       );
     }
-    return res.json();
+    return response.json();
   })
-  .then(data => {
-    data.forEach(file => {
+  .then(files => {
+    if (!Array.isArray(files) || files.length === 0) {
+      throw new Error("youchien.txt に画像ファイル名がありません。");
+    }
+
+    files.forEach(file => {
       const page = document.createElement("div");
       page.className = "page";
 
       const img = document.createElement("img");
-      img.src = "./YouchienBoueigumi/" + file;
+      img.src = imageFolder + file;
       img.alt = file;
 
       img.onerror = () => {
-        console.error("画像を読み込めませんでした：", img.src);
+        errorBox.textContent =
+          "画像が見つかりません: " + img.src;
       };
 
       page.appendChild(img);
       container.appendChild(page);
     });
 
-    updateProgress();
+    /* 画像を並べた後、右端（1ページ目）から開始 */
+    requestAnimationFrame(() => {
+      container.scrollLeft = container.scrollWidth;
+      updateProgress();
+    });
   })
   .catch(error => {
-    console.error("読み込みエラー：", error);
-
-    const message = document.createElement("p");
-    message.style.color = "#000";
-    message.style.padding = "20px";
-    message.textContent =
-      "マンガを読み込めませんでした。ファイル名と保存場所を確認してください。";
-
-    document.body.appendChild(message);
+    errorBox.textContent = "読み込みエラー: " + error.message;
+    console.error(error);
   });
 
-/* ===== 読了率計算 ===== */
 function updateProgress() {
   const maxScroll =
     container.scrollWidth - container.clientWidth;
@@ -126,15 +146,12 @@ function updateProgress() {
     return;
   }
 
-  const progress =
-    1 - container.scrollLeft / maxScroll;
-
+  const progress = container.scrollLeft / maxScroll;
   progressBar.style.width =
     Math.max(0, Math.min(progress * 100, 100)) + "%";
 }
 
 container.addEventListener("scroll", updateProgress);
 </script>
-
 </body>
 </html>
