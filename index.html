@@ -526,18 +526,24 @@
     $("logText").value = makeCSV();
   }
 
-  viewer.addEventListener("pointerdown", event => {
-    if (!active || config.mode !== "manual") return;
+  
+viewer.addEventListener("pointermove", event => {
+  if (!dragging || event.pointerId !== pointerId) return;
 
-    dragging = true;
-    pointerId = event.pointerId;
-    startX = event.clientX;
+  const now = performance.now();
+  const deltaX = event.clientX - lastX;
+
+  // 指を右へ動かすと、次の画面へ進む
+  setPosition(
+    startPosition + (event.clientX - startX) /
+    (viewer.clientWidth || window.innerWidth)
+  );
+
+  if (Math.abs(deltaX) > 2) {
     lastX = event.clientX;
-    startPosition = position;
-    lastMoveAt = performance.now();
-
-    viewer.setPointerCapture(event.pointerId);
-  });
+    lastMoveAt = now;
+  }
+});
 
   viewer.addEventListener("pointermove", event => {
     if (!dragging || event.pointerId !== pointerId) return;
