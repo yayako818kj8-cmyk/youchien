@@ -56,14 +56,14 @@
   }
 
   #strip {
-    position: absolute;
-    top: 0;
-    right: 0;
-    height: 100%;
-    display: flex;
-    flex-direction: row-reverse;
-    will-change: transform;
-  }
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: row;
+  will-change: transform;
+}
 
   .page {
     flex: 0 0 100vw;
@@ -215,7 +215,7 @@
     <p>これから漫画を読んでいただきます。</p>
     <ol>
       <li>スマートフォンを縦向きに持ってください。</li>
-      <li>画面を左方向へスワイプすると読み進められます。</li>
+      <li>画面を右方向へスワイプすると読み進められます。</li>
       <li>最後まで読んだら「読み終わった」を押してください。</li>
     </ol>
     <p class="muted" id="condition"></p>
@@ -320,7 +320,7 @@
     const width = viewer.clientWidth || window.innerWidth;
 
     strip.style.transform =
-      "translate3d(" + (position * width) + "px, 0, 0)";
+  "translate3d(" + (-position * width) + "px, 0, 0)";
 
     progressBar.style.width =
       (maxPosition > 0
@@ -545,11 +545,11 @@
     const now = performance.now();
     const deltaX = event.clientX - lastX;
 
-    // 指を左へ動かすと、次の画面へ進む
-    setPosition(
-      startPosition + (startX - event.clientX) /
-      (viewer.clientWidth || window.innerWidth)
-    );
+    // 指を右へ動かすと、次の画面へ進む
+setPosition(
+  startPosition + (event.clientX - startX) /
+  (viewer.clientWidth || window.innerWidth)
+);
 
     if (Math.abs(deltaX) > 2) {
       lastX = event.clientX;
