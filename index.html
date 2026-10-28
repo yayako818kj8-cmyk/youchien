@@ -55,15 +55,16 @@
     -webkit-user-select: none;
   }
 
+  /* 画像を右から左へ並べる */
   #strip {
-  position: absolute;
-  top: 0;
-  left: 0;
-  height: 100%;
-  display: flex;
-  flex-direction: row;
-  will-change: transform;
-}
+    position: absolute;
+    top: 0;
+    right: 0;
+    height: 100%;
+    display: flex;
+    flex-direction: row-reverse;
+    will-change: transform;
+  }
 
   .page {
     flex: 0 0 100vw;
@@ -267,7 +268,7 @@
   const progressBar = $("progress-bar");
   const errorBox = $("error");
 
-  // 漫画画像の保存先。既存のフォルダ名を維持する
+  // 漫画画像の保存先
   const imageFolder = "./YouchienBoueigumi/";
 
   // URLで実験条件を指定
@@ -305,7 +306,6 @@
   let startX = 0;
   let startPosition = 0;
   let lastX = 0;
-  let lastMoveAt = 0;
   let operationCount = 0;
   let operations = [];
   let movementLog = [];
@@ -319,8 +319,9 @@
   function render() {
     const width = viewer.clientWidth || window.innerWidth;
 
+    // positionが増えると次の画像へ進む
     strip.style.transform =
-  "translate3d(" + (-position * width) + "px, 0, 0)";
+      "translate3d(" + (position * width) + "px, 0, 0)";
 
     progressBar.style.width =
       (maxPosition > 0
@@ -336,11 +337,8 @@
       lastLoggedPosition = position;
     }
 
-    if (position >= maxPosition && active) {
-      $("endBtn").hidden = false;
-    } else {
-      $("endBtn").hidden = true;
-    }
+    // 最後の画像まで進むと終了ボタンを表示
+    $("endBtn").hidden = !(position >= maxPosition && active);
   }
 
   function setPosition(value) {
@@ -356,6 +354,7 @@
 
     pages.forEach(page => {
       page.style.width = width + "px";
+      page.style.flexBasis = width + "px";
     });
 
     render();
@@ -368,26 +367,44 @@
 
   function makeCSV() {
     const rows = [
-      ["record_type", "participant_id", "mode",
-       "time_ms", "position", "operation"]
+      [
+        "record_type",
+        "participant_id",
+        "mode",
+        "time_ms",
+        "position",
+        "operation"
+      ]
     ];
 
     rows.push([
-      "summary", config.id, config.mode,
-      endedAt - startedAt, position, operationCount
+      "summary",
+      config.id,
+      config.mode,
+      endedAt - startedAt,
+      position,
+      operationCount
     ]);
 
     operations.forEach(op => {
       rows.push([
-        "operation", config.id, config.mode,
-        op.time, op.position, op.type
+        "operation",
+        config.id,
+        config.mode,
+        op.time,
+        op.position,
+        op.type
       ]);
     });
 
     movementLog.forEach(item => {
       rows.push([
-        "movement", config.id, config.mode,
-        item.time, item.position, ""
+        "movement",
+        config.id,
+        config.mode,
+        item.time,
+        item.position,
+        ""
       ]);
     });
 
@@ -526,40 +543,36 @@
     $("logText").value = makeCSV();
   }
 
-  
-viewer.addEventListener("pointermove", event => {
-  if (!dragging || event.pointerId !== pointerId) return;
+  /* 手動スクロール：右方向へのスワイプで読み進める */
+  viewer.addEventListener("pointerdown", event => {
+    if (!active || config.mode !== "manual") return;
 
-  const now = performance.now();
-  const deltaX = event.clientX - lastX;
+    // マウスの場合は左ボタンだけを受け付ける
+    if (event.pointerType === "mouse" && event.button !== 0) return;
 
-  // 指を右へ動かすと、次の画面へ進む
-  setPosition(
-    startPosition + (event.clientX - startX) /
-    (viewer.clientWidth || window.innerWidth)
-  );
-
-  if (Math.abs(deltaX) > 2) {
+    dragging = true;
+    pointerId = event.pointerId;
+    startX = event.clientX;
     lastX = event.clientX;
-    lastMoveAt = now;
-  }
-});
+    startPosition = position;
+
+    viewer.setPointerCapture(event.pointerId);
+  });
 
   viewer.addEventListener("pointermove", event => {
     if (!dragging || event.pointerId !== pointerId) return;
 
-    const now = performance.now();
     const deltaX = event.clientX - lastX;
 
-    // 指を右へ動かすと、次の画面へ進む
-setPosition(
-  startPosition + (event.clientX - startX) /
-  (viewer.clientWidth || window.innerWidth)
-);
+    // 指を右へ動かすほどpositionが増え、次の画像へ進む
+    setPosition(
+      startPosition +
+      (event.clientX - startX) /
+      (viewer.clientWidth || window.innerWidth)
+    );
 
     if (Math.abs(deltaX) > 2) {
       lastX = event.clientX;
-      lastMoveAt = now;
     }
   });
 
@@ -586,6 +599,7 @@ setPosition(
 
   viewer.addEventListener("pointerup", stopDragging);
   viewer.addEventListener("pointercancel", stopDragging);
+  viewer.addEventListener("lostpointercapture", stopDragging);
 
   $("startBtn").addEventListener("click", startReading);
   $("endBtn").addEventListener("click", finishReading);
@@ -622,7 +636,9 @@ setPosition(
     }
   });
 
-  window.addEventListener("resize", resize);
+  window.addEventListener("resize", () => {
+    if (loaded) resize();
+  });
 
   loadImages();
 })();
