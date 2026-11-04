@@ -6,6 +6,7 @@
 <meta name="viewport"
       content="width=device-width, initial-scale=1, maximum-scale=1,
                user-scalable=no, viewport-fit=cover">
+
 <title>幼稚園防衛組｜読書実験</title>
 
 <style>
@@ -210,27 +211,34 @@
   読み終わった
 </button>
 
+<!-- 開始画面 -->
 <div class="overlay" id="intro">
   <div class="panel">
     <h1>漫画の読書実験</h1>
+
     <p>これから漫画を読んでいただきます。</p>
+
     <ol>
       <li>スマートフォンを縦向きに持ってください。</li>
       <li>画面を右方向へスワイプすると読み進められます。</li>
       <li>最後まで読んだら「読み終わった」を押してください。</li>
     </ol>
+
     <p class="muted" id="condition"></p>
     <p class="muted" id="loadStatus">漫画画像を読み込み中...</p>
+    <p class="muted" id="loadError"></p>
+
     <button type="button" class="btn" id="startBtn" disabled>
       読み始める
     </button>
-    <p class="muted" id="loadError"></p>
   </div>
 </div>
 
+<!-- 終了画面 -->
 <div class="overlay" id="done" hidden>
   <div class="panel">
     <h1>おつかれさまでした</h1>
+
     <p>読書実験が終了しました。</p>
 
     <dl class="stats">
@@ -238,20 +246,27 @@
         <dt>読書時間</dt>
         <dd id="d-time">0:00</dd>
       </div>
+
       <div>
         <dt>操作回数</dt>
         <dd id="d-ops">0</dd>
       </div>
     </dl>
 
+    <p class="muted" id="uploadStatus">
+      Firebase接続準備中...
+    </p>
+
     <button type="button" class="btn" id="saveBtn">
       記録をCSVで保存
     </button>
+
     <button type="button" class="btn secondary" id="copyBtn">
       記録をコピー
     </button>
 
     <p class="muted" id="copyMsg"></p>
+
     <textarea id="logText" readonly
               aria-label="実験記録"></textarea>
   </div>
@@ -259,8 +274,30 @@
 
 <div id="error"></div>
 
-<script>
+<script type="module">
+
+/* Firebase SDK */
+import { initializeApp } from
+  "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
+
+import {
+  getAuth,
+  signInAnonymously
+} from
+  "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
+
+import {
+  getFirestore,
+  collection,
+  addDoc,
+  serverTimestamp
+} from
+  "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
+
+
+/* メイン処理 */
 (() => {
+
   const $ = id => document.getElementById(id);
 
   const viewer = $("viewer");
@@ -268,10 +305,37 @@
   const progressBar = $("progress-bar");
   const errorBox = $("error");
 
-  // 漫画画像の保存先
+
+  /* Firebase設定 */
+
+  const firebaseConfig = {
+    apiKey: "AIzaSyDD-p9Ds4p2NVQYEJHBzcspjrUKgipaUyc",
+    authDomain: "manga-reading-experiment.firebaseapp.com",
+    projectId: "manga-reading-experiment",
+    storageBucket: "manga-reading-experiment.firebasestorage.app",
+    messagingSenderId: "760642752854",
+    appId: "1:760642752854:web:f64900517baf3af0d006f7",
+    measurementId: "G-5VC4R6RYCV"
+  };
+
+  const app = initializeApp(firebaseConfig);
+  const auth = getAuth(app);
+  const db = getFirestore(app);
+
+
+  /* 認証情報 */
+
+  let authReady = false;
+  let firebaseUid = null;
+
+
+  /* 漫画画像の保存先 */
+
   const imageFolder = "./YouchienBoueigumi/";
 
-  // URLで実験条件を指定
+
+  /* URL設定 */
+
   const params = new URLSearchParams(location.search);
 
   const config = {
@@ -279,9 +343,10 @@
       .replace(/[^\w.-]/g, "_")
       .slice(0, 40),
 
-    mode: params.get("mode") === "auto" ? "auto" : "manual",
+    mode: params.get("mode") === "auto"
+      ? "auto"
+      : "manual",
 
-    // 自動送りの速度：1秒あたりに進む画面数
     speed: Math.max(
       0.02,
       Math.min(2, Number(params.get("speed")) || 0.2)
@@ -291,81 +356,178 @@
   $("condition").textContent =
     "参加者ID：" + config.id +
     " ／ 条件：" +
-    (config.mode === "auto" ? "自動送り" : "手動スクロール");
+    (config.mode === "auto"
+      ? "自動送り"
+      : "手動スクロール");
+
+
+  /* 読書データ */
 
   let pages = [];
+
   let position = 0;
   let maxPosition = 0;
+
   let startedAt = 0;
   let endedAt = 0;
+
   let lastFrame = 0;
   let animationId = null;
+
   let active = false;
   let dragging = false;
   let pointerId = null;
+
   let startX = 0;
   let startPosition = 0;
   let lastX = 0;
+
   let operationCount = 0;
+
   let operations = [];
   let movementLog = [];
+
   let lastLoggedPosition = -1;
+  let lastMovementLogAt = -1;
+
   let loaded = false;
+  let uploadStarted = false;
+
+
+  /* 共通関数 */
 
   function clamp(value, min, max) {
     return Math.max(min, Math.min(max, value));
   }
 
-  function render() {
-    const width = viewer.clientWidth || window.innerWidth;
+  function updateStartButton() {
+    $("startBtn").disabled = !(loaded && authReady);
+  }
 
-    // positionが増えると次の画像へ進む
+
+  /* Firebase匿名認証 */
+
+  async function initializeAuth() {
+
+    try {
+
+      const credential = await signInAnonymously(auth);
+
+      firebaseUid = credential.user.uid;
+      authReady = true;
+
+      $("uploadStatus").textContent =
+        "Firebaseに接続しました。";
+
+      updateStartButton();
+
+    } catch (error) {
+
+      console.error("Firebase認証エラー:", error);
+
+      $("loadError").textContent =
+        "Firebase認証エラー：" + error.message;
+
+      $("loadStatus").textContent =
+        "Firebaseに接続できませんでした。";
+
+      $("uploadStatus").textContent =
+        "Firebase認証に失敗しました。";
+    }
+  }
+
+
+  /* 画面描画 */
+
+  function render() {
+
+    const width =
+      viewer.clientWidth || window.innerWidth;
+
     strip.style.transform =
-      "translate3d(" + (position * width) + "px, 0, 0)";
+      "translate3d(" +
+      (position * width) +
+      "px, 0, 0)";
 
     progressBar.style.width =
       (maxPosition > 0
         ? position / maxPosition * 100
         : 100) + "%";
 
-    if (position !== lastLoggedPosition) {
+
+    /* 読書位置の記録 */
+
+    const now = performance.now();
+
+    if (
+      active &&
+      position !== lastLoggedPosition &&
+      (
+        lastMovementLogAt < 0 ||
+        now - lastMovementLogAt >= 250
+      )
+    ) {
+
       movementLog.push({
-        time: Math.round(performance.now() - startedAt),
+        time: Math.round(now - startedAt),
         position: Number(position.toFixed(3))
       });
 
       lastLoggedPosition = position;
+      lastMovementLogAt = now;
     }
 
-    // 最後の画像まで進むと終了ボタンを表示
-    $("endBtn").hidden = !(position >= maxPosition && active);
+
+    /* 終了ボタン */
+
+    $("endBtn").hidden =
+      !(position >= maxPosition && active);
   }
 
+
   function setPosition(value) {
+
     position = clamp(value, 0, maxPosition);
+
     render();
   }
 
+
+  /* 画面サイズ調整 */
+
   function resize() {
-    const width = viewer.clientWidth || window.innerWidth;
+
+    const width =
+      viewer.clientWidth || window.innerWidth;
 
     maxPosition = Math.max(0, pages.length - 1);
-    strip.style.width = (pages.length * width) + "px";
+
+    strip.style.width =
+      (pages.length * width) + "px";
 
     pages.forEach(page => {
+
       page.style.width = width + "px";
       page.style.flexBasis = width + "px";
+
     });
 
     render();
   }
 
+
+  /* CSV作成 */
+
   function csvEscape(value) {
+
     const str = String(value ?? "");
+
     return '"' + str.replace(/"/g, '""') + '"';
   }
 
+
   function makeCSV() {
+
     const rows = [
       [
         "record_type",
@@ -381,12 +543,13 @@
       "summary",
       config.id,
       config.mode,
-      endedAt - startedAt,
+      Math.round(endedAt - startedAt),
       position,
       operationCount
     ]);
 
     operations.forEach(op => {
+
       rows.push([
         "operation",
         config.id,
@@ -395,9 +558,11 @@
         op.position,
         op.type
       ]);
+
     });
 
     movementLog.forEach(item => {
+
       rows.push([
         "movement",
         config.id,
@@ -406,165 +571,364 @@
         item.position,
         ""
       ]);
+
     });
 
     return "\uFEFF" +
-      rows.map(row => row.map(csvEscape).join(",")).join("\r\n");
+      rows.map(row =>
+        row.map(csvEscape).join(",")
+      ).join("\r\n");
   }
 
-  async function loadImages() {
+
+  /* Firestore自動保存 */
+
+  async function uploadData() {
+
+    if (uploadStarted) return;
+
+    uploadStarted = true;
+
+    $("uploadStatus").textContent =
+      "実験データをFirebaseに送信しています...";
+
+    const record = {
+
+      uid: firebaseUid,
+
+      participantId: config.id,
+
+      mode: config.mode,
+
+      autoSpeed:
+        config.mode === "auto"
+          ? config.speed
+          : null,
+
+      durationMs:
+        Math.round(endedAt - startedAt),
+
+      operationCount: operationCount,
+
+      finalPosition:
+        Number(position.toFixed(3)),
+
+      totalPages: pages.length,
+
+      operations: operations,
+
+      movementLog: movementLog,
+
+      completedAt: serverTimestamp()
+
+    };
+
+
     try {
+
+      const docRef = await addDoc(
+        collection(db, "reading_sessions"),
+        record
+      );
+
+      $("uploadStatus").textContent =
+        "Firebaseへの保存が完了しました。";
+
+      console.log(
+        "保存成功。ドキュメントID:",
+        docRef.id
+      );
+
+    } catch (error) {
+
+      console.error("Firebase保存エラー:", error);
+
+      $("uploadStatus").textContent =
+        "自動保存に失敗しました。CSVを保存してください。";
+
+      $("copyMsg").textContent =
+        "エラー：" + error.message;
+
+      uploadStarted = false;
+    }
+  }
+
+
+  /* 漫画画像読み込み */
+
+  async function loadImages() {
+
+    try {
+
       const response = await fetch("./youchien.txt");
 
       if (!response.ok) {
+
         throw new Error(
           "youchien.txt の読み込みに失敗しました (HTTP " +
           response.status + ")"
         );
+
       }
 
       const files = await response.json();
 
       if (!Array.isArray(files) || files.length === 0) {
+
         throw new Error(
           "youchien.txt に画像ファイル名がありません。"
         );
+
       }
 
+
       const results = await Promise.all(
-        files.map(file => new Promise(resolve => {
-          const img = new Image();
 
-          img.onload = () => resolve({ file, img, ok: true });
-          img.onerror = () => resolve({ file, img, ok: false });
+        files.map(file =>
 
-          img.src = imageFolder + file;
-        }))
+          new Promise(resolve => {
+
+            const img = new Image();
+
+            img.onload = () =>
+              resolve({ file, img, ok: true });
+
+            img.onerror = () =>
+              resolve({ file, img, ok: false });
+
+            img.src = imageFolder + file;
+
+          })
+
+        )
+
       );
+
 
       const failed = results.filter(item => !item.ok);
 
       if (failed.length) {
+
         throw new Error(
           "読み込めない画像があります：\n" +
           failed.map(item => item.file).join("\n")
         );
+
       }
 
+
       results.forEach(item => {
+
         const page = document.createElement("section");
+
         page.className = "page";
 
         item.img.alt = item.file;
+
         page.appendChild(item.img);
+
         strip.appendChild(page);
+
         pages.push(page);
+
       });
+
 
       loaded = true;
 
       $("loadStatus").textContent =
         "画像 " + pages.length + " 枚を読み込みました。";
 
-      $("startBtn").disabled = false;
+      updateStartButton();
 
     } catch (error) {
-      $("loadStatus").textContent = "画像を読み込めませんでした。";
+
+      $("loadStatus").textContent =
+        "画像を読み込めませんでした。";
+
       $("loadError").textContent = error.message;
+
       errorBox.textContent = error.message;
+
       console.error(error);
+
     }
   }
 
+
+  /* 読書開始 */
+
   function startReading() {
-    if (!loaded || active) return;
+
+    if (!loaded || !authReady || active) return;
 
     active = true;
+    uploadStarted = false;
+
     position = 0;
+
     operationCount = 0;
+
     operations = [];
     movementLog = [];
+
     lastLoggedPosition = -1;
+    lastMovementLogAt = -1;
+
     startedAt = performance.now();
 
     $("intro").hidden = true;
     $("done").hidden = true;
+
     viewer.hidden = false;
+
     $("endBtn").hidden = true;
+
     errorBox.textContent = "";
 
     resize();
+
     setPosition(0);
 
+
+    /* 自動送り */
+
     if (config.mode === "auto") {
+
       lastFrame = 0;
-      animationId = requestAnimationFrame(autoAdvance);
+
+      animationId =
+        requestAnimationFrame(autoAdvance);
+
     }
+
   }
 
+
+  /* 自動送り処理 */
+
   function autoAdvance(timestamp) {
+
     if (!active || config.mode !== "auto") return;
 
     if (lastFrame) {
-      const delta = Math.min(timestamp - lastFrame, 100);
-      setPosition(position + delta / 1000 * config.speed);
+
+      const delta =
+        Math.min(timestamp - lastFrame, 100);
+
+      setPosition(
+        position + delta / 1000 * config.speed
+      );
+
     }
 
     lastFrame = timestamp;
 
     if (position < maxPosition) {
-      animationId = requestAnimationFrame(autoAdvance);
+
+      animationId =
+        requestAnimationFrame(autoAdvance);
+
     }
+
   }
 
+
+  /* 読書終了 */
+
   function finishReading() {
+
     if (!active) return;
 
     active = false;
+
     endedAt = performance.now();
 
+
+    /* 最終位置を記録 */
+
+    movementLog.push({
+
+      time: Math.round(endedAt - startedAt),
+
+      position: Number(position.toFixed(3))
+
+    });
+
+
     if (animationId !== null) {
+
       cancelAnimationFrame(animationId);
+
       animationId = null;
+
     }
 
+
     $("endBtn").hidden = true;
+
     viewer.hidden = true;
+
     $("done").hidden = false;
 
-    const seconds = Math.floor((endedAt - startedAt) / 1000);
-    const minutes = Math.floor(seconds / 60);
-    const remainder = seconds % 60;
+
+    const seconds =
+      Math.floor((endedAt - startedAt) / 1000);
+
+    const minutes =
+      Math.floor(seconds / 60);
+
+    const remainder =
+      seconds % 60;
+
 
     $("d-time").textContent =
-      minutes + ":" + String(remainder).padStart(2, "0");
+      minutes + ":" +
+      String(remainder).padStart(2, "0");
 
     $("d-ops").textContent = operationCount;
+
     $("logText").value = makeCSV();
+
+
+    /* Firebaseへ自動送信 */
+
+    uploadData();
+
   }
 
-  /* 手動スクロール：右方向へのスワイプで読み進める */
+
+  /* 手動スクロール */
+
   viewer.addEventListener("pointerdown", event => {
+
     if (!active || config.mode !== "manual") return;
 
-    // マウスの場合は左ボタンだけを受け付ける
-    if (event.pointerType === "mouse" && event.button !== 0) return;
+    if (
+      event.pointerType === "mouse" &&
+      event.button !== 0
+    ) return;
 
     dragging = true;
+
     pointerId = event.pointerId;
+
     startX = event.clientX;
     lastX = event.clientX;
+
     startPosition = position;
 
     viewer.setPointerCapture(event.pointerId);
+
   });
 
+
   viewer.addEventListener("pointermove", event => {
+
     if (!dragging || event.pointerId !== pointerId) return;
 
     const deltaX = event.clientX - lastX;
 
-    // 指を右へ動かすほどpositionが増え、次の画像へ進む
     setPosition(
       startPosition +
       (event.clientX - startX) /
@@ -572,76 +936,150 @@
     );
 
     if (Math.abs(deltaX) > 2) {
+
       lastX = event.clientX;
+
     }
+
   });
 
+
   function stopDragging(event) {
+
     if (!dragging) return;
+
     if (event && event.pointerId !== pointerId) return;
 
     dragging = false;
 
-    const distance = Math.abs(position - startPosition);
+    const distance =
+      Math.abs(position - startPosition);
 
     if (distance > 0.005) {
+
       operationCount++;
 
       operations.push({
-        time: Math.round(performance.now() - startedAt),
+
+        time: Math.round(
+          performance.now() - startedAt
+        ),
+
         position: Number(position.toFixed(3)),
+
         type: "swipe"
+
       });
+
     }
 
     pointerId = null;
+
   }
 
-  viewer.addEventListener("pointerup", stopDragging);
-  viewer.addEventListener("pointercancel", stopDragging);
-  viewer.addEventListener("lostpointercapture", stopDragging);
 
-  $("startBtn").addEventListener("click", startReading);
-  $("endBtn").addEventListener("click", finishReading);
+  viewer.addEventListener("pointerup", stopDragging);
+
+  viewer.addEventListener("pointercancel", stopDragging);
+
+  viewer.addEventListener(
+    "lostpointercapture",
+    stopDragging
+  );
+
+
+  /* ボタン */
+
+  $("startBtn").addEventListener(
+    "click",
+    startReading
+  );
+
+  $("endBtn").addEventListener(
+    "click",
+    finishReading
+  );
+
+
+  /* CSV保存 */
 
   $("saveBtn").addEventListener("click", () => {
+
     const blob = new Blob(
       [makeCSV()],
       { type: "text/csv;charset=utf-8;" }
     );
 
     const url = URL.createObjectURL(blob);
+
     const link = document.createElement("a");
 
     link.href = url;
+
     link.download =
-      "reading_" + config.id + "_" + config.mode + ".csv";
+      "reading_" +
+      config.id + "_" +
+      config.mode + ".csv";
 
     document.body.appendChild(link);
+
     link.click();
+
     link.remove();
 
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    setTimeout(
+      () => URL.revokeObjectURL(url),
+      1000
+    );
+
   });
 
-  $("copyBtn").addEventListener("click", async () => {
-    try {
-      await navigator.clipboard.writeText(makeCSV());
-      $("copyMsg").textContent = "記録をコピーしました。";
-    } catch {
-      $("logText").focus();
-      $("logText").select();
-      $("copyMsg").textContent =
-        "自動コピーできません。テキストを選択してコピーしてください。";
+
+  /* CSVコピー */
+
+  $("copyBtn").addEventListener(
+    "click",
+    async () => {
+
+      try {
+
+        await navigator.clipboard.writeText(makeCSV());
+
+        $("copyMsg").textContent =
+          "記録をコピーしました。";
+
+      } catch {
+
+        $("logText").focus();
+
+        $("logText").select();
+
+        $("copyMsg").textContent =
+          "自動コピーできません。テキストを選択してコピーしてください。";
+
+      }
+
     }
-  });
+  );
+
+
+  /* 画面サイズ変更 */
 
   window.addEventListener("resize", () => {
+
     if (loaded) resize();
+
   });
 
+
+  /* 初期化 */
+
+  initializeAuth();
+
   loadImages();
+
 })();
+
 </script>
 
 </body>
