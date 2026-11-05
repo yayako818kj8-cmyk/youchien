@@ -29,15 +29,13 @@
   }
 
   /* 進捗バー */
-  #progress {
-    position: fixed;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 6px;
-    background: rgba(0, 0, 0, 0.15);
-    z-index: 5;
-  }
+  #progress-bar {
+  width: 100%;
+  height: 100%;
+  background: #00ccaa;
+  transform: scaleX(0);
+  transform-origin: right center;
+}
 
   #progress-bar {
     width: 0%;
@@ -449,11 +447,10 @@ import {
       (position * width) +
       "px, 0, 0)";
 
-    progressBar.style.width =
-      (maxPosition > 0
-        ? position / maxPosition * 100
-        : 100) + "%";
-
+    progressBar.style.transform =
+  `scaleX(${maxPosition > 0
+    ? position / maxPosition
+    : 1})`;
 
     /* 読書位置の記録 */
 
